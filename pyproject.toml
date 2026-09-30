@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tgf"
+dynamic = ["version"]
+description = "Ultra-lightweight macOS webcam posture monitor"
+readme = "README.md"
+requires-python = ">=3.9,<3.13"
+dependencies = [
+    "mediapipe>=0.10.14,<=0.10.21",
+    "opencv-contrib-python>=4.9,<4.12",
+    "numpy>=1.26,<2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+tgf = "tgf.cli:main"
+
+[tool.setuptools]
+packages = ["tgf"]
+
+[tool.setuptools.dynamic]
+version = { attr = "tgf.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
