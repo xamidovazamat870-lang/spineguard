@@ -91,9 +91,62 @@ class Pipeline:
         self._drift_ctx: Optional[ProfileContext] = None
         self._settle_prev_cx: Optional[float] = None
 
+    @property
+    def calib_state(self) -> CalibState:
+        return self._calib_state
+
     def request_recalibrate(self) -> None:
         self._recalibrate_flag = True
 
     def profiles_snapshot(self) -> list:
         """List (index, ctx, last_used) for CLI '-p' / '--profiles'."""
-        return
+        return [(i, p.ctx, p.last_used) for i, p in enumerate(self.bank.profiles)]
+
+    def _to_profile_ctx(self, ctx: PoseContext) -> ProfileContext:
+        return ProfileContext(cx=ctx.cx, scale=ctx.scale, body_yaw_deg=ctx.body_yaw_deg)
+
+    def _persist(self, baseline: Baseline) -> None:
+        try:
+            _save_baseline(baseline, self.baseline_path)
+        except OSError:
+            pass
+        if self.profiles_path is not None:
+            try:
+                _save_bank(self.bank, self.profiles_path)
+            except OSError:
+                pass
+
+    def _accept_new_baseline(
+        self,
+        new_bl: Baseline,
+        ctx: PoseContext,
+        reason: ReanchorReason,
+    ) -> bool:
+        # Guard: if we already have profiles, reject if roll deviates too far
+        if self.bank.profiles:
+            # Check against the nearest known profile's shoulder
+            nearest = self.bank.match(self._to_profile_ctx(ctx))
+            if nearest is None:
+                # Fallback to the first profile if no direct match
+                nearest = self.bank.profiles[0]
+            if abs(new_bl.shoulder - nearest.baseline.shoulder) > self.cfg.reanchor_roll_guard:
+                return False
+
+        pctx = self._to_profile_ctx(ctx)
+        self._active_profile = self.bank.upsert(pctx, new_bl)
+        self._monitor = PostureMonitor(self.cfg, new_bl)
+        self._persist(new_bl)
+        return True
+
+    def _maybe_reanchor(self, ctx: PoseContext, cap_ts: float, now: float) -> Optional[ReanchorReason]:
+        if not self.cfg.auto_reanchor:
+            return None
+
+        pctx = self._to_profile_ctx(ctx)
+
+        # 1. Match against known profile
+        matched = self.bank.match(pctx)
+        if matched is not None and matched is not self._active_profile:
+            self._active_profile = matched
+            self.bank.touch(matched, now)
+            self._monitor = Post
